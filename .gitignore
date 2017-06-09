@@ -15,3 +15,5 @@ MANIFEST
 *.orig
 windows/version.txt
 *.parm
+*.jpg
+*.txt
