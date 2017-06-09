@@ -7,10 +7,11 @@ from MAVProxy.modules.lib import mp_module
 from MAVProxy.modules.lib import mp_util
 if mp_util.has_wxpython:
     from MAVProxy.modules.lib.mp_menu import *
-
+from interop import AsyncClient
 class WPModule(mp_module.MPModule):
     def __init__(self, mpstate):
         super(WPModule, self).__init__(mpstate, "wp", "waypoint handling", public = True)
+        self.client = AsyncClient('http://10.1.1.3:8000','testuser','testpass')
         self.wp_op = None
         self.wp_requested = {}
         self.wp_received = {}
@@ -20,11 +21,12 @@ class WPModule(mp_module.MPModule):
         self.loading_waypoint_lasttime = time.time()
         self.last_waypoint = 0
         self.wp_period = mavutil.periodic_event(0.5)
+        self.collision_period = mavutil.periodic_event(10)
         self.undo_wp = None
         self.undo_type = None
         self.undo_wp_idx = -1
         self.add_command('wp', self.cmd_wp,       'waypoint management',
-                         ["<list|clear|move|remove|loop|set|undo|movemulti|changealt|param|status>",
+                         ["<list|clear|move|remove|loop|set|undo|movemulti|changealt|param|status|interop>",
                           "<load|update|save|show> (FILENAME)"])
 
         if self.continue_mode and self.logdir != None:
@@ -167,6 +169,14 @@ class WPModule(mp_module.MPModule):
         if self.module('map') is not None and not self.menu_added_map:
             self.menu_added_map = True
             self.module('map').add_menu(self.menu)
+        if self.collision_period.trigger():
+            #collision avoid and update
+            #Todo: find way to access:
+            #plane_lla,current_wp,obj_lla, safety_dist(set as mavproxy setting?), expected_count
+            #obstacles = client.get_missions()
+            ###wps = avoider.update()
+            #if wps is not None:
+            pass    
 
     def process_waypoint_request(self, m, master):
         '''process a waypoint request from the master'''
@@ -274,7 +284,7 @@ class WPModule(mp_module.MPModule):
         if self.wploader.count() > 0:
             return self.wploader.wp(0)
         return None
-        
+
 
     def wp_draw_callback(self, points):
         '''callback from drawing waypoints'''
@@ -295,6 +305,29 @@ class WPModule(mp_module.MPModule):
             use_terrain = False
         for p in points:
             self.wploader.add_latlonalt(p[0], p[1], self.settings.wpalt, terrain_alt=use_terrain)
+        self.send_all_waypoints()
+
+    def wp_from_interop(self):
+        try:
+            mission = self.client.get_missions().result()[0]
+            print mission
+        except:
+            pass
+        #try:
+        wps = mission.mission_waypoints
+        for i in wps:
+            if self.wploader.count() == 0:
+                self.wploader.add_latlonalt(i.latitude,i.longitude,0)
+            wp = self.wploader.wp(i.order-1)
+            print wp
+            self.wploader.add_latlonalt(i.latitude,i.longitude,i.altitude_msl)
+        #except:
+        #    print "wp upload failed."
+        self.loading_waypoints = True
+        self.loading_waypoint_lasttime = time.time()
+
+        wp.target_system = self.target_system
+        wp.target_component = self.target_component
         self.send_all_waypoints()
 
     def wp_loop(self):
@@ -650,6 +683,8 @@ class WPModule(mp_module.MPModule):
             self.wp_loop()
         elif args[0] == "status":
             self.wp_status()
+        elif args[0] == "interop":
+            self.wp_from_interop()
         else:
             print(usage)
 

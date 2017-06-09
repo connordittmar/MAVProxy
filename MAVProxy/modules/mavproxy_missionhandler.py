@@ -5,21 +5,7 @@ Connor Ditmar, April 2017
 
 This module simply gets missions from the interop server and writes to the Pixhawk:
 example mission:
-{'active': True,
- 'air_drop_pos': {'latitude': 38.141833, 'longitude': -76.425263},
- 'emergent_last_known_pos': {'latitude': 38.145823, 'longitude': -76.422396},
- 'fly_zones': [],
- 'home_pos': {'latitude': 38.14792, 'longitude': -76.427995},
- 'id': 1,
- 'mission_waypoints': [{'altitude_msl': 200.0,
-                        'latitude': 38.142544,
-                        'longitude': -76.434088,
-                        'order': 1}],
- 'off_axis_target_pos': {'latitude': 38.142544, 'longitude': -76.434088},
- 'search_grid_points': [{'altitude_msl': 200.0,
-                         'latitude': 38.142544,
-                         'longitude': -76.434088,
-                         'order': 1}]}
+
 
 '''
 
@@ -41,12 +27,11 @@ class MissionHandler(mp_module.MPModule):
         """Initialise module"""
         super(MissionHandler, self).__init__(mpstate, "missionhandler",
                                             "Use Interop to configure mission.", public=True)
-        self.add_command('login', self.cmd_login, "Login to Server",["<url> (server url)",
-                        "<username> (username)","<password> (password)"])
         self.add_command('mission', self.cmd_mission, "Mission Handling", ["<view>",
-                        "<writewps>","<writefence","<writemission>"])
+                        "<writewps>","<writefence","<writemission>","<test>"])
         #I have hardcoed client for now. DO NOT DO THIS IN THE FUTURE
-        self.client = AsyncClient('http://10.17.163.109:8000','testuser','testpass')
+        self.client = AsyncClient('http://10.1.1.3:8000','testuser','testpass')
+        self.wploader = mavwp.MAVWPLoader()
     def usage(self):
         '''show help on command line options'''
         return """Usage: login <url (server url) | username (username) | password (password)> ,
@@ -58,6 +43,8 @@ class MissionHandler(mp_module.MPModule):
             print self.usage()
         elif args[0] == "view":
             self.viewmission()
+        elif args[0] == "test":
+            self.pull_waypoints()
 
     def viewmission(self):
         '''returns information about module'''
@@ -71,6 +58,33 @@ class MissionHandler(mp_module.MPModule):
             self.mission = m
             try:
                 self.wploader.save(filename)
+            except:
+                pass
+
+    def pull_waypoints(self):
+        self.wploader.target_system = self.target_system
+        self.wploader.target_component = self.target_component
+        try:
+            mission = self.client.get_missions().result()[0]
+            print mission
+        except:
+            pass
+        #try:
+        wps = mission.mission_waypoints
+        for i in wps:
+            if self.wploader.count() == 0:
+                self.wploader.add_latlonalt(i.latitude,i.longitude,0)
+            wp = self.wploader.wp(i.order-1)
+            print wp
+            self.wploader.add_latlonalt(i.latitude,i.longitude,i.altitude_msl)
+        #except:
+        #    print "wp upload failed."
+        self.loading_waypoints = True
+        self.loading_waypoint_lasttime = time.time()
+
+        wp.target_system = self.target_system
+        wp.target_component = self.target_component
+        self.master.mav.send(self.wploader.wp(wps[-1].order-1))
 
 def init(mpstate):
     '''initialise module'''
